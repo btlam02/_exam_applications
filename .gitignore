@@ -1,0 +1,8 @@
+backend/.env
+backend/my_app/__pycache__
+_env
+backend/assessment/migrations
+backend/assessment/__pycache__
+backend/users/__pycache__
+backend/users/migrations
+backend/assessment/services/__pycache__
