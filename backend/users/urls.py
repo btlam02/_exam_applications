@@ -13,5 +13,5 @@ urlpatterns = [
     path('', UserListView.as_view()),
     path('<int:pk>/', UserDetailView.as_view()),
     path('me/', CurrentUserView.as_view(), name='current-user'),
-
+    
 ]

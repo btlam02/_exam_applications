@@ -6,3 +6,6 @@ backend/assessment/__pycache__
 backend/users/__pycache__
 backend/users/migrations
 backend/assessment/services/__pycache__
+frontend/exam-app/node_modules
+frontend/exam-app/.env
+frontend/exam-app/README.md
