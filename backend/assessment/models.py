@@ -68,11 +68,29 @@ class QuestionStats(models.Model):
     exposure_rate = models.FloatField(null=True, blank=True)
 
 # === 4) Người học & năng lực ===
-class StudentAbility(models.Model):
-    student = models.OneToOneField(User, on_delete=models.CASCADE, primary_key=True, related_name="ability")
+# === 4) Người học & năng lực (ĐÃ CẬP NHẬT) ===
+# XÓA model StudentAbility cũ đi
+# class StudentAbility(models.Model): ...
+
+# THÊM model mới này vào
+class StudentAbilityProfile(models.Model):
+
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name="ability_profiles")
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE)
+    
+    # Năng lực ước tính (Estimate)
     theta = models.FloatField(default=0.0)
-    se = models.FloatField(default=1.0)
+    
+    # Sai số chuẩn của ước tính (Standard Error)
+    se = models.FloatField(default=1.0) 
+    
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("student", "topic")
+
+    def __str__(self):
+        return f"{self.student.username} | {self.topic.name} | T={self.theta:.2f} (SE={self.se:.2f})"
 
 # === 5) Phiên kiểm tra (CAT & Fixed) ===
 class TestSession(models.Model):
