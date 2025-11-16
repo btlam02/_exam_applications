@@ -1,21 +1,24 @@
 // src/pages/AdaptiveTestPage.jsx
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import apiClient from "../../api/assessment"; // dùng trực tiếp như bạn đang có
+import apiClient from "../../api/assessment";
 import QuestionDisplay from "../../components/QuestionDisplay";
 
 function Spinner({ text = "Đang tải..." }) {
   return (
-    <div className="flex items-center gap-3 text-sm text-slate-600" aria-live="polite">
+    <div
+      className="inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm text-slate-700 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300"
+      aria-live="polite"
+    >
       <svg
-        className="h-5 w-5 animate-spin"
+        className="h-5 w-5 animate-spin text-indigo-600 dark:text-indigo-400"
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
         viewBox="0 0 24 24"
         aria-hidden
       >
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        <circle className="opacity-30" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
       </svg>
       <span>{text}</span>
     </div>
@@ -36,16 +39,15 @@ export default function AdaptiveTestPage() {
   const [selectedOptionId, setSelectedOptionId] = useState(null);
 
   const [testStats, setTestStats] = useState({ position: 0, target: 0 });
-  const [abilityVector, setAbilityVector] = useState(null); // để xem năng lực trả về nếu backend có trả
+  const [abilityVector, setAbilityVector] = useState(null);
 
-  const [isLoading, setIsLoading] = useState(true);   // khi start
-  const [isSubmitting, setIsSubmitting] = useState(false); // khi nộp đáp án
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
   // --- đo latency mỗi câu ---
   const startTimeRef = useRef(null);
   useEffect(() => {
-    // set mốc thời gian khi có câu hỏi mới
     if (currentQuestion?.id) startTimeRef.current = performance.now();
   }, [currentQuestion?.id]);
 
@@ -99,10 +101,8 @@ export default function AdaptiveTestPage() {
       const data = res.data;
 
       if (data.stop) {
-        // điều hướng sang trang kết quả, truyền state nếu cần hiển thị thêm
         navigate("/results", { state: { results: data, session_id: sessionId } });
       } else {
-        // chuyển câu kế tiếp
         setCurrentQuestion(data.next_question);
         setTestStats({ position: data.current_position, target: data.target_items });
         setAbilityVector(data.ability_vector ?? null);
@@ -116,49 +116,55 @@ export default function AdaptiveTestPage() {
     }
   };
 
-  const handleQuit = () => {
-    // có thể gọi API kết thúc session nếu backend hỗ trợ, tạm thời quay về trang chủ/kết quả
-    navigate("/");
-  };
+  const handleQuit = () => navigate("/");
 
-  // --- render ---
+  // --- UI states ---
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-16">
-        <Spinner text="Đang chuẩn bị bài test..." />
-      </div>
+      <main className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-slate-50 px-4 py-16 dark:from-slate-900 dark:via-slate-950 dark:to-black">
+        <div className="mx-auto max-w-3xl text-center">
+          <Spinner text="Đang chuẩn bị bài test..." />
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+            Vui lòng đợi trong giây lát.
+          </p>
+        </div>
+      </main>
     );
   }
 
   if (error) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-16">
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+      <main className="min-h-screen bg-gradient-to-b from-rose-50 via-white to-slate-50 px-4 py-16 dark:from-slate-900 dark:via-slate-950 dark:to-black">
+        <div className="mx-auto max-w-3xl">
+          <div className="rounded-2xl border border-red-200 bg-red-50/80 p-5 text-sm text-red-700 shadow-sm dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+            {error}
+          </div>
+          <button
+            onClick={startTest}
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700"
+          >
+            Thử lại
+          </button>
         </div>
-        <button
-          onClick={startTest}
-          className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
-        >
-          Thử lại
-        </button>
-      </div>
+      </main>
     );
   }
 
   if (!currentQuestion) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-16">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm text-slate-700">Không tìm thấy câu hỏi.</p>
-          <button
-            onClick={startTest}
-            className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
-          >
-            Bắt đầu lại
-          </button>
+      <main className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-slate-50 px-4 py-16 dark:from-slate-900 dark:via-slate-950 dark:to-black">
+        <div className="mx-auto max-w-3xl">
+          <div className="rounded-2xl border border-slate-200 bg-white/80 p-6 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/60">
+            <p className="text-sm text-slate-700 dark:text-slate-300">Không tìm thấy câu hỏi.</p>
+            <button
+              onClick={startTest}
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700"
+            >
+              Bắt đầu lại
+            </button>
+          </div>
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -168,81 +174,116 @@ export default function AdaptiveTestPage() {
   );
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            Bài Kiểm Tra Thích Ứng (CAT)
-          </h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Câu hỏi {testStats.position} / {testStats.target}
-          </p>
+    <main className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-slate-50 px-4 py-8 dark:from-slate-900 dark:via-slate-950 dark:to-black">
+      <div className="mx-auto max-w-4xl">
+        {/* Header */}
+        <header className="mb-6 flex items-center justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-white/70 px-3 py-1 text-xs text-indigo-700 shadow-sm backdrop-blur dark:border-indigo-900/40 dark:bg-slate-900/40 dark:text-indigo-300">
+              <span className="inline-block h-2 w-2 rounded-full bg-indigo-500" />
+              CAT session
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">
+              Bài Kiểm Tra Thích Ứng (CAT)
+            </h1>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              Câu hỏi {testStats.position} / {testStats.target}
+            </p>
+          </div>
+
+          <button
+            onClick={handleQuit}
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white/80 px-3 text-sm font-medium text-slate-700 shadow-sm backdrop-blur transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-900"
+          >
+            Thoát
+          </button>
+        </header>
+
+        {/* Question Card */}
+        <section className="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-lg backdrop-blur dark:border-slate-800 dark:bg-slate-900/60">
+          {/* Progress bar */}
+          <div className="mb-5">
+            <div className="mb-1 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span>Tiến độ</span>
+              <span aria-live="polite">
+                {progress}% ({testStats.position - 1}/{testStats.target})
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+              <div
+                className="h-2 rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 transition-[width] duration-300 ease-out"
+                style={{ width: `${progress}%` }}
+                role="progressbar"
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              />
+            </div>
+          </div>
+
+          {/* Question */}
+          <div className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+            Câu {testStats.position}:
+          </div>
+          <QuestionDisplay
+            question={currentQuestion}
+            selectedOptionId={selectedOptionId}
+            onAnswerSelect={setSelectedOptionId}
+            disabled={isSubmitting}
+          />
+
+          {/* ability (nếu backend trả về) */}
+          {abilityVector && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+                Tóm tắt năng lực (server trả):
+              </div>
+              <pre className="whitespace-pre-wrap break-words text-xs text-slate-700 dark:text-slate-300">
+                {JSON.stringify(abilityVector, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {/* Error trong th*/}
+          {error && (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50/80 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              {error}
+            </div>
+          )}
+        </section>
+
+        {/* Action bar */}
+        <div className="sticky bottom-4 z-10 mt-6">
+          <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-xl backdrop-blur dark:border-slate-800 dark:bg-slate-900/60">
+            <div className="text-sm text-slate-600 dark:text-slate-300">
+              Đã chọn: {selectedOptionId ? "1 đáp án" : "Chưa chọn"} | Câu {testStats.position} /{" "}
+              {testStats.target}
+            </div>
+            <button
+              onClick={handleSubmitAnswer}
+              disabled={selectedOptionId === null || isSubmitting}
+              className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus:ring-offset-slate-900"
+            >
+              {isSubmitting ? (
+                <>
+                  <svg
+                    className="mr-2 h-4 w-4 animate-spin"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  Đang nộp…
+                </>
+              ) : (
+                "Nộp & Tiếp tục"
+              )}
+            </button>
+          </div>
         </div>
-        <button
-          onClick={handleQuit}
-          className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
-        >
-          Thoát
-        </button>
       </div>
-
-      {/* Thẻ câu hỏi */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        {/* Progress bar */}
-        <div className="mb-4">
-          <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
-            <span>Tiến độ</span>
-            <span>{progress}%</span>
-          </div>
-          <div className="h-2 w-full rounded-full bg-slate-100">
-            <div
-              className="h-2 rounded-full bg-slate-900 transition-all"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Question */}
-        <div className="mb-2 text-sm font-medium text-slate-700">Câu {testStats.position}:</div>
-        <QuestionDisplay
-          question={currentQuestion}
-          selectedOptionId={selectedOptionId}
-          onAnswerSelect={setSelectedOptionId}
-          disabled={isSubmitting}
-        />
-
-        {/* ability (nếu backend trả về) */}
-        {abilityVector && (
-          <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-3">
-            <div className="text-xs font-medium text-slate-600 mb-1">Tóm tắt năng lực (server trả):</div>
-            <pre className="whitespace-pre-wrap break-words text-xs text-slate-600">
-              {JSON.stringify(abilityVector, null, 2)}
-            </pre>
-          </div>
-        )}
-
-        {/* Error trong thẻ */}
-        {error && (
-          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* Action bar */}
-      <div className="sticky bottom-4 mt-6 flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
-        <div className="text-sm text-slate-600">
-          Đã chọn: {selectedOptionId ? "1 đáp án" : "Chưa chọn"} | Câu {testStats.position} / {testStats.target}
-        </div>
-        <button
-          onClick={handleSubmitAnswer}
-          disabled={selectedOptionId === null || isSubmitting}
-          className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isSubmitting ? "Đang nộp…" : "Nộp & Tiếp tục"}
-        </button>
-      </div>
-    </div>
+    </main>
   );
 }

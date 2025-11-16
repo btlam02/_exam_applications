@@ -14,7 +14,7 @@ function ResultsPage() {
       </div>
     );
   }
-
+  
   // Chuyển đổi ability_vector (object) thành một mảng để map
   const abilities = Object.entries(results.ability_vector || {});
 

@@ -9,7 +9,7 @@ function QuestionDisplay({ question, onAnswerSelect, selectedOptionId, disabled 
   return (
     <div>
       {/* Thêm style cho câu hỏi */}
-      <h3 className="text-xl font-semibold mb-4">{question.stem}</h3>
+      <h3 className="text-xl text-white font-semibold mb-4">{question.stem}</h3>
       
       <div>
         {question.options.map((option) => (
