@@ -9,7 +9,8 @@ export default function Navbar() {
 
   const navItems = [
     { name: "Trang chủ", path: "/" },
-    { name: "Liên hệ", path: "/contact" },
+    { name: "Sinh câu hỏi", path: "/llms" },
+    { name: "Duyệt câu hỏi", path: "/can-llms" },
   ];  
 
   // Link styles tối ưu cho nền tím

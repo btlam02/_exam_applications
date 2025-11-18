@@ -132,3 +132,52 @@ class Rule(models.Model):
     condition_json = models.JSONField(default=dict)  # {"type":"topic_mastery_below","topic_id":10,"threshold":0.4}
     action_json = models.JSONField(default=dict)     # {"type":"boost_topic_probability","topic_id":10,"weight":1.5}
     is_active = models.BooleanField(default=True)
+
+
+class CandidateQuestion(models.Model):
+    STATUS_CHOICES = (
+        ("pending", "Pending review"),
+        ("accepted", "Accepted"),
+        ("rejected", "Rejected"),
+    )
+
+    subject = models.ForeignKey("Subject", on_delete=models.CASCADE, related_name="candidate_questions")
+    topic = models.ForeignKey("Topic", on_delete=models.CASCADE, related_name="candidate_questions")
+
+    # Nội dung câu hỏi + phương án
+    stem = models.TextField()                     # nội dung câu hỏi
+    options_json = models.JSONField()            # VD: ["opt A", "opt B", "opt C", "opt D"]
+    correct_answer = models.CharField(max_length=4)  # "A", "B", "C", hoặc "D"
+
+    # Độ khó mục tiêu mà giáo viên chọn lúc generate (Easy/Medium/Hard)
+    target_difficulty = models.CharField(max_length=16, default="Medium")
+
+    # Độ khó do Gemini sinh ra
+    difficulty_score_gemini = models.FloatField(null=True, blank=True)
+    difficulty_label_gemini = models.CharField(max_length=16, null=True, blank=True)
+
+    # Độ khó do DeepSeek (hoặc bước đánh giá) chấm lại
+    difficulty_score_deepseek = models.FloatField(null=True, blank=True)
+    difficulty_label_deepseek = models.CharField(max_length=16, null=True, blank=True)
+
+    # Các chỉ số định lượng (0-1) do LLM đánh giá
+    validity = models.FloatField(null=True, blank=True)             # tính hợp lệ
+    on_topic = models.FloatField(null=True, blank=True)             # bám sát chủ đề
+    clarity = models.FloatField(null=True, blank=True)              # rõ ràng
+    single_correct = models.FloatField(null=True, blank=True)       # chỉ có 1 đáp án đúng
+    similarity_to_examples = models.FloatField(null=True, blank=True)  # mức giống seed
+
+    # Chỉ số tổng hợp
+    overall_score = models.FloatField(null=True, blank=True)
+
+    # Nhận xét định tính (comment)
+    comment = models.TextField(null=True, blank=True)
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="pending")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"[{self.subject}] {self.stem[:60]}..."
+
+

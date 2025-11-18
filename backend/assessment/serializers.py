@@ -1,13 +1,17 @@
 # assessment/serializers.py
 from rest_framework import serializers
 from django.db import transaction
-
 from .models import (
-    Subject, Question, QuestionOption, QuestionIRT,
-    StudentAbilityProfile, Topic
+    Subject,
+    Question,
+    QuestionOption,
+    QuestionIRT,
+    StudentAbilityProfile,
+    Topic,
+    CandidateQuestion,
 )
 
-# === SERIALIZER ĐỌC CHI TIẾT ===
+# === SERIALIZER ĐỌC CHI TIẾT (READ ONLY) ===
 
 class QuestionOptionSerializer(serializers.ModelSerializer):
     """
@@ -50,7 +54,7 @@ class SubjectSerializer(serializers.ModelSerializer):
 
 class TopicSerializer(serializers.ModelSerializer):
     """
-    Dùng cho endpoint /topics/ (nếu bạn tạo).
+    Dùng cho endpoint /topics/.
     Cho phép frontend load danh sách chủ đề theo môn.
     """
     subject_id = serializers.IntegerField(source="subject.id", read_only=True)
@@ -67,7 +71,7 @@ class QuestionIRTSerializer(serializers.ModelSerializer):
         fields = ["a", "b", "c"]
 
 
-# === SERIALIZER GHI (CREATE/UPDATE) ===
+# === SERIALIZER GHI (CREATE/UPDATE QUESTION + OPTIONS) ===
 
 class QuestionOptionWriteSerializer(serializers.ModelSerializer):
     """
@@ -109,7 +113,7 @@ class QuestionWriteSerializer(serializers.ModelSerializer):
         return instance
 
 
-# === SERIALIZER INPUT CHO API ===
+# === SERIALIZER INPUT CHO API CAT/FIXED TEST ===
 
 class StartCatSerializer(serializers.Serializer):
     """
@@ -158,3 +162,58 @@ class GenerateFixedTestSerializer(serializers.Serializer):
         choices=["easy", "medium", "hard"],
         required=False
     )
+
+
+# === SERIALIZER INPUT CHO API SINH CÂU HỎI LLM ===
+
+class GenerateQuestionRequestSerializer(serializers.Serializer):
+    """
+    Input cho API:
+    POST /api/questions/generate-llm/
+
+    Dùng để yêu cầu LLM sinh thêm câu hỏi cho 1 môn + 1 topic cụ thể.
+    """
+    subject_id = serializers.IntegerField()
+    topic_id = serializers.IntegerField()
+    # bạn có thể đồng bộ với difficulty_tag trong Question, tuỳ convention:
+    target_difficulty = serializers.ChoiceField(
+        choices=["easy", "medium", "hard"],
+        required=False,
+        default="medium",
+    )
+    num_questions = serializers.IntegerField(
+        min_value=1,
+        max_value=50,
+        default=5,
+        help_text="Số câu hỏi cần sinh ra",
+    )
+
+
+# === SERIALIZER CHO CÂU HỎI ỨNG VIÊN (LLM SINH RA) ===
+
+class CandidateQuestionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CandidateQuestion
+        fields = [
+            "id",
+            "subject",
+            "topic",
+            "stem",
+            "options_json",
+            "correct_answer",
+            "target_difficulty",
+            "difficulty_score_gemini",
+            "difficulty_label_gemini",
+            "difficulty_score_deepseek",
+            "difficulty_label_deepseek",
+            "validity",
+            "on_topic",
+            "clarity",
+            "single_correct",
+            "similarity_to_examples",
+            "overall_score",
+            "comment",
+            "status",
+            "created_at",
+        ]
+        depth = 1  # để subject, topic trả luôn name/id lồng trong object

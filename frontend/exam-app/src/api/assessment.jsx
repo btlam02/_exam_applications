@@ -11,7 +11,6 @@ const apiClient = axios.create({
   },
 });
 
-
 export const generateFixedTest = (payload) =>
   apiClient.post("/fixed-test/generate/", payload);
 
@@ -23,5 +22,22 @@ export const catStart = (payload) =>
 
 export const catAnswer = (payload) =>
   apiClient.post("/cat/answer/", payload);
+
+export const fetchSubjects = () => apiClient.get("/subjects/");
+export const fetchTopicsBySubject = (subjectId) =>
+  apiClient.get(`/topics/?subject_id=${subjectId}`);
+
+export const generateQuestionsLLM = (payload) =>
+  apiClient.post("/questions/generate-llm/", payload);
+
+export const fetchCandidateQuestions = (params = {}) =>
+  apiClient.get("/questions/candidates/", { params });
+
+export const approveCandidateQuestion = (id) =>
+  apiClient.post(`/questions/candidates/${id}/approve/`);
+
+export const rejectCandidateQuestion = (id) =>
+  apiClient.post(`/questions/candidates/${id}/reject/`);
+
 
 export default apiClient;

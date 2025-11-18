@@ -6,9 +6,11 @@ import Navbar from './components/Navbar';
 import AdaptiveTestPage from'./pages/home/AdaptiveTestPage'
 import FixedTestPage from './pages/home/FixedTestPage';
 import ResultsPage from './pages/home/ResultPage';
+import GenerateQuestionsPage from './pages/home/LLMs'
 import "./App.css"
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import CandidateQuestionsReviewPage from './pages/home/CandidateQuestionPage';
 
 
 function App() { 
@@ -23,6 +25,8 @@ function App() {
         <Route path="/test/cat" element={<AdaptiveTestPage />} />
         <Route path="/test/fixed" element={<FixedTestPage />} />
         <Route path="/results" element={<ResultsPage />} />
+        <Route path="/llms" element={<GenerateQuestionsPage/>} />
+        <Route path="/can-llms" element={<CandidateQuestionsReviewPage/>} />
       </Routes>
     </Router>
     </div>

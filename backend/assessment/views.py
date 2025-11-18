@@ -396,6 +396,9 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.db.models import Avg, Q
 
+from .services.question_pipeline import generate_candidate_questions
+from .serializers import GenerateQuestionRequestSerializer
+
 from assessment.models import (
     Subject, Question, QuestionOption, QuestionIRT,
     TestSession, TestItem, TestResponse,
@@ -442,6 +445,45 @@ class QuestionViewSet(viewsets.ModelViewSet):
         if self.action in ["create", "update", "partial_update"]:
             return QuestionWriteSerializer
         return QuestionDetailSerializer
+
+
+    @action(detail=False, methods=["post"], url_path="generate_ai")
+    def generate_ai(self, request):
+        """
+        API sinh câu hỏi bằng Gemini.
+        Payload: {
+            "subject_name": "Mạng máy tính",
+            "topic_name": "Mô hình OSI",
+            "difficulty": "medium",
+            "count": 5
+        }
+        """
+        # 1. Validate input
+        ser = GenerateQuestionRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        try:
+            # 2. Gọi Service Gemini
+            count = generate_questions_with_gemini(
+                subject_name=data['subject_name'],
+                topic_name=data['topic_name'],
+                difficulty=data['difficulty'],
+                count=data['count']
+            )
+            
+            return Response({
+                "message": f"Thành công! Đã sinh và lưu {count} câu hỏi mới.",
+                "params": data
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response(
+                {"error": "Lỗi sinh câu hỏi", "detail": str(e)}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 
     @action(detail=True, methods=["put"])
     def irt(self, request, pk=None):
@@ -728,4 +770,111 @@ class FixedTestViewSet(viewsets.ViewSet):
                 "detail": detail,
             }
         )
+    
+
+
+# assessment/views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Subject, Topic, CandidateQuestion
+from .serializers import CandidateQuestionSerializer
+from .services.question_pipeline import generate_candidate_questions, promote_candidate_to_question
+
+
+class GenerateQuestionLLMView(APIView):
+    """
+    POST /api/questions/generate-llm/
+    {
+      "subject_id": 1,
+      "topic_id": 2,
+      "target_difficulty": "Medium",
+      "num_questions": 5
+    }
+    """
+
+    def post(self, request, *args, **kwargs):
+        subject_id = request.data.get("subject_id")
+        topic_id = request.data.get("topic_id")
+        target_difficulty = request.data.get("target_difficulty", "Medium")
+        num_questions = int(request.data.get("num_questions", 5))
+
+        subject = Subject.objects.filter(id=subject_id).first()
+        topic = Topic.objects.filter(id=topic_id, subject_id=subject_id).first()
+        if not subject or not topic:
+            return Response(
+                {"detail": "Không tìm thấy môn học hoặc chủ đề."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        candidates = generate_candidate_questions(
+            subject=subject,
+            topic=topic,
+            target_difficulty=target_difficulty,
+            num_questions=num_questions,
+        )
+
+        ser = CandidateQuestionSerializer(candidates, many=True)
+        return Response(
+            {"created": len(candidates), "items": ser.data},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CandidateQuestionListView(APIView):
+    """
+    GET /api/questions/candidates/?status=pending&subject_id=...
+    """
+
+    def get(self, request, *args, **kwargs):
+        qs = CandidateQuestion.objects.all().order_by("-created_at")
+
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+
+        subject_id = request.query_params.get("subject_id")
+        if subject_id:
+            qs = qs.filter(subject_id=subject_id)
+
+        topic_id = request.query_params.get("topic_id")
+        if topic_id:
+            qs = qs.filter(topic_id=topic_id)
+
+        ser = CandidateQuestionSerializer(qs, many=True)
+        return Response(ser.data)
+
+
+class CandidateQuestionApproveView(APIView):
+    """
+    POST /api/questions/candidates/<id>/approve/
+    """
+
+    def post(self, request, pk, *args, **kwargs):
+        cand = CandidateQuestion.objects.filter(id=pk).first()
+        if not cand:
+            return Response({"detail": "Không tìm thấy candidate."}, status=404)
+        if cand.status == "accepted":
+            return Response({"detail": "Câu hỏi đã được chấp nhận trước đó."}, status=400)
+
+        q = promote_candidate_to_question(cand)
+        return Response({"detail": "Đã chuyển thành câu hỏi chính.", "question_id": q.id})
+
+
+class CandidateQuestionRejectView(APIView):
+    """
+    POST /api/questions/candidates/<id>/reject/
+    """
+
+    def post(self, request, pk, *args, **kwargs):
+        cand = CandidateQuestion.objects.filter(id=pk).first()
+        if not cand:
+            return Response({"detail": "Không tìm thấy candidate."}, status=404)
+        cand.status = "rejected"
+        cand.save(update_fields=["status"])
+        return Response({"detail": "Đã từ chối câu hỏi."})
+
+
+
+
 
