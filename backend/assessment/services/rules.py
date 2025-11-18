@@ -23,6 +23,11 @@ def evaluate_rules(
         "difficulty_range": {"b_min": float|None, "b_max": float|None, "lte_position": int|None},
         "block_question_ids": [int, ...]
       }
+
+    Mục tiêu:
+    - Cho phép cấu hình luật "sư phạm" mà không phải đổi code.
+    - Dùng mastery (tỉ lệ đúng) + theta (IRT) để điều chỉnh phân phối câu hỏi.
+    - Giảm lặp lại câu (exposure cooldown).
     """
     from assessment.models import Rule, TestResponse, QuestionTag
 
@@ -32,7 +37,7 @@ def evaluate_rules(
         "block_question_ids": set(),
     }
 
-    # --- Mastery theo topic: tỷ lệ đúng 20 câu gần nhất của student ---
+    # -------- 1) Tính mastery theo topic (tỉ lệ đúng các câu gần đây) --------
     latest = (
         TestResponse.objects
         .filter(session__student_id=student_id, session__subject_id=subject_id)
@@ -40,10 +45,10 @@ def evaluate_rules(
         .order_by("-answered_at")[:200]
     )
 
-    # Map question_id -> correctness
+    # Map question_id -> correctness (lần trả lời gần nhất trong 200 câu)
     q_correct = {r.question_id: (1 if r.is_correct else 0) for r in latest}
 
-    # Map topic_id -> list of y
+    # Map topic_id -> list[y]
     topic_history: Dict[int, list[int]] = defaultdict(list)
     if q_correct:
         rel = (
@@ -56,18 +61,27 @@ def evaluate_rules(
 
     topic_mastery: Dict[int, float] = {}
     for tid, arr in topic_history.items():
-        arr = arr[:20]
+        # Có thể cắt về 20 gần nhất nếu muốn:
+        # arr = arr[:20]
         if arr:
             topic_mastery[tid] = sum(arr) / float(len(arr))
 
-    # --- Duyệt Rule ---
-    for r in Rule.objects.filter(is_active=True):
-        cond = r.condition_json or {}
-        act  = r.action_json or {}
+    ability_vector = ability_vector or {}
+
+    # -------- 2) Duyệt Rule (hiện tại là global, không filter theo subject) --------
+    rules = Rule.objects.filter(is_active=True)
+
+    for r in rules:
+        cond: Dict[str, Any] = r.condition_json or {}
+        act: Dict[str, Any]  = r.action_json or {}
         ctype = cond.get("type")
         atype = act.get("type")
 
-        # 1) mastery thấp -> boost topic
+        # == Rule 1: mastery thấp -> boost topic ==
+        # {
+        #   "condition_json": {"type": "topic_mastery_below", "topic_id": 1, "threshold": 0.6},
+        #   "action_json":    {"type": "boost_topic_probability", "weight": 1.5}
+        # }
         if ctype == "topic_mastery_below" and atype == "boost_topic_probability":
             topic_id = cond.get("topic_id")
             if topic_id is None:
@@ -80,7 +94,28 @@ def evaluate_rules(
                 prev = ctx["topic_boost"].get(topic_id, 1.0)
                 ctx["topic_boost"][topic_id] = max(weight, prev)
 
-        # 2) giới hạn độ khó b trong giai đoạn đầu phiên
+        # == Rule 2: theta thấp theo topic -> boost topic (dùng IRT) ==
+        # {
+        #   "condition_json": {"type": "topic_theta_below", "topic_id": 1, "threshold": 0.0},
+        #   "action_json":    {"type": "boost_topic_probability", "weight": 1.5}
+        # }
+        if ctype == "topic_theta_below" and atype == "boost_topic_probability":
+            topic_id = cond.get("topic_id")
+            if topic_id is None:
+                continue
+            threshold = float(cond.get("threshold", 0.0))
+            weight = float(act.get("weight", 1.5))
+            theta = ability_vector.get(topic_id, None)
+            # Nếu chưa có theta hoặc theta < threshold -> coi là yếu ở topic đó
+            if theta is None or theta < threshold:
+                prev = ctx["topic_boost"].get(topic_id, 1.0)
+                ctx["topic_boost"][topic_id] = max(weight, prev)
+
+        # == Rule 3: giới hạn độ khó b trong giai đoạn đầu phiên ==
+        # {
+        #   "condition_json": {"type": "session_stage", "lte_position": 5},
+        #   "action_json":    {"type": "set_difficulty_range", "b_min": -2.0, "b_max": 0.0}
+        # }
         if ctype == "session_stage" and atype == "set_difficulty_range":
             ctx["difficulty_range"] = {
                 "b_min": act.get("b_min"),
@@ -88,18 +123,30 @@ def evaluate_rules(
                 "lte_position": cond.get("lte_position", 5),
             }
 
-        # 3) cooldown phơi nhiễm (ví dụ 7 ngày gần nhất)
+        # == Rule 4: cooldown phơi nhiễm (theo student + subject) ==
+        # {
+        #   "condition_json": {"type": "exposure_cooldown", "days": 7},
+        #   "action_json":    {"type": "block_items"}
+        # }
         if ctype == "exposure_cooldown" and atype == "block_items":
             days = int(cond.get("days", 7))
             since = timezone.now() - timedelta(days=days)
             recent_qids = (
                 TestResponse.objects
-                .filter(answered_at__gte=since, session__subject_id=subject_id)
+                .filter(
+                    answered_at__gte=since,
+                    session__subject_id=subject_id,
+                    session__student_id=student_id,
+                )
                 .values_list("question_id", flat=True)
             )
             ctx["block_question_ids"].update(recent_qids)
 
-        # 4) block theo một topic cụ thể
+        # == Rule 5: block theo một topic cụ thể ==
+        # {
+        #   "condition_json": {"type": "block_topic", "topic_id": 1},
+        #   "action_json":    {"type": "block_items"}
+        # }
         if ctype == "block_topic" and atype == "block_items":
             topic_id = cond.get("topic_id")
             if topic_id is None:
@@ -135,7 +182,10 @@ def _theta_for_question(
     ability_vector: Dict[int, float],
     avg_theta: float,
 ) -> float:
-    """Lấy theta cho câu hỏi bằng trung bình theta trên các topic của câu; fallback avg_theta."""
+    """
+    Lấy theta cho câu hỏi = trung bình theta trên các topic của câu.
+    Nếu không có topic hoặc không có theta nào -> fallback avg_theta.
+    """
     tids = q_topics.get(qid, None)
     if not tids:
         return avg_theta
@@ -151,31 +201,36 @@ def select_next_item(
     rule_ctx: dict,
     *,
     position_in_session: Optional[int] = None,
+    topic_ids: Optional[Iterable[int]] = None,   # 👈 THÊM THAM SỐ NÀY
 ):
     """
     Chọn câu tối đa Fisher info + áp ràng buộc:
       - block_question_ids
       - difficulty_range (b_min, b_max, lte_position)
       - topic_boost
+      - topic_ids: nếu không None -> chỉ chọn câu thuộc các topic này
+
     Nếu tie gần nhau, ngẫu nhiên nhẹ để đa dạng.
+    Nếu không tìm được câu IRT hợp lệ, fallback chọn random.
+
+    Mục tiêu:
+    - Tối đa hóa thông tin IRT (ước lượng năng lực chính xác hơn).
+    - Tập trung vào topic yếu (mastery thấp / theta thấp).
+    - Giữ độ khó phù hợp giai đoạn làm bài.
+    - Tránh lặp câu quá nhiều / kẹt không có câu.
     """
     from assessment.models import Question
     from assessment.services.irt import fisher_info
 
-    # Lấy các câu hỏi ứng viên
-    qs = (
-        Question.objects
-        .filter(subject_id=subject_id)
-        .exclude(id__in=used_q_ids)
-        .select_related("irt")
-    )
-
-    # Ràng buộc từ rule context
+    ability_vector = ability_vector or {}
     block_ids = set(rule_ctx.get("block_question_ids", []))
     topic_boost = rule_ctx.get("topic_boost", {})
     dr = rule_ctx.get("difficulty_range")  # {"b_min","b_max","lte_position"}
 
-    # Quyết định áp range b hay không
+    # Chuẩn hoá topic_ids -> set[int] (nếu có)
+    topic_ids_set = set(int(tid) for tid in topic_ids) if topic_ids is not None else None
+
+    # -------- 1) Quyết định có áp range b hay không --------
     apply_b_range = False
     b_min = b_max = None
     if dr:
@@ -189,32 +244,66 @@ def select_next_item(
         b_min = dr.get("b_min")
         b_max = dr.get("b_max")
 
-    # Chuẩn bị topic map để không N+1
+    # -------- 2) Lấy candidate từ DB (thô) --------
+    qs = (
+        Question.objects
+        .filter(subject_id=subject_id)
+        .exclude(id__in=used_q_ids)
+        .exclude(id__in=block_ids)
+        .select_related("irt")
+    )
+
+    # Lọc theo độ khó (IRT b) nếu cần
+    if apply_b_range:
+        diff_filter = Q()
+        if b_min is not None:
+            diff_filter &= Q(irt__b__gte=b_min)
+        if b_max is not None:
+            diff_filter &= Q(irt__b__lte=b_max)
+        if diff_filter:
+            qs = qs.filter(diff_filter)
+
     qids = list(qs.values_list("id", flat=True))
+    if not qids:
+        # Không còn câu nào sau khi filter -> fallback random (áp topic_ids nếu có)
+        fallback_qs = (
+            Question.objects
+            .filter(subject_id=subject_id)
+            .exclude(id__in=used_q_ids)
+            .exclude(id__in=block_ids)
+        )
+        if topic_ids_set is not None:
+            fallback_qs = fallback_qs.filter(questiontag__topic_id__in=topic_ids_set).distinct()
+        return fallback_qs.order_by("?").first()
+
+    # Chuẩn bị topic map để không N+1
     q_topics = _build_question_topics_map(qids)
 
+    # -------- 3) Chấm điểm Fisher info * topic_boost (kèm lọc topic_ids nếu có) --------
     best: list = []
     best_score = -1.0
 
     for q in qs:
-        if q.id in block_ids:
-            continue
+        # Nếu có filter theo topic_ids thì bỏ những câu không thuộc các topic đó
+        if topic_ids_set is not None:
+            tids_of_q = q_topics.get(q.id, set())
+            if not (tids_of_q & topic_ids_set):
+                continue
 
         irt = getattr(q, "irt", None)
         a = getattr(irt, "a", None)
         b = getattr(irt, "b", None)
         c = getattr(irt, "c", None)
 
-        # Range độ khó theo b (nếu có)
-        if apply_b_range and (b is not None):
-            if (b_min is not None and b < b_min) or (b_max is not None and b > b_max):
-                continue
+        # Chỉ xét những câu có đủ tham số IRT
+        if a is None or b is None or c is None:
+            continue
 
         # Lấy theta "phù hợp" với câu dựa trên topic của câu
         theta_q = _theta_for_question(q.id, q_topics, ability_vector, avg_theta)
 
-        # Thông tin Fisher
-        info = fisher_info(theta_q, a, b, c) if (a is not None and b is not None and c is not None) else 0.0
+        # Thông tin Fisher (IRT)
+        info = fisher_info(theta_q, a, b, c)
         if info <= 0.0:
             continue
 
@@ -231,7 +320,27 @@ def select_next_item(
         elif abs(score - best_score) <= 1e-9:  # tie
             best.append(q)
 
+    # -------- 4) Fallback khi không có câu IRT hợp lệ --------
     if not best:
-        return None
+        fallback_qs = (
+            Question.objects
+            .filter(subject_id=subject_id)
+            .exclude(id__in=used_q_ids)
+            .exclude(id__in=block_ids)
+        )
+        if apply_b_range:
+            diff_filter = Q()
+            if b_min is not None:
+                diff_filter &= Q(irt__b__gte=b_min)
+            if b_max is not None:
+                diff_filter &= Q(irt__b__lte=b_max)
+            if diff_filter:
+                fallback_qs = fallback_qs.filter(diff_filter)
 
+        if topic_ids_set is not None:
+            fallback_qs = fallback_qs.filter(questiontag__topic_id__in=topic_ids_set).distinct()
+
+        return fallback_qs.order_by("?").first()
+
+    # -------- 5) Ngẫu nhiên nhẹ giữa các câu có score tốt nhất --------
     return random.choice(best)

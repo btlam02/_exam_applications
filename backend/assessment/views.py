@@ -16,7 +16,7 @@ from assessment.models import (
 from .serializers import (
     SubjectSerializer, QuestionWriteSerializer, QuestionDetailSerializer,
     QuestionIRTSerializer, StartCatSerializer, AnswerCatSerializer,
-    GenerateFixedTestSerializer
+    GenerateFixedTestSerializer, TopicSerializer,   # cần có TopicSerializer trong serializers.py
 )
 
 from assessment.services.irt import update_theta_newton
@@ -27,6 +27,23 @@ from assessment.services.rules import evaluate_rules, select_next_item
 class SubjectViewSet(viewsets.ModelViewSet):
     queryset = Subject.objects.all()
     serializer_class = SubjectSerializer
+
+
+class TopicViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    /api/topics/
+    - GET /api/topics/                -> tất cả topic
+    - GET /api/topics/?subject_id=1   -> topic thuộc môn 1
+    """
+    queryset = Topic.objects.select_related("subject").all()
+    serializer_class = TopicSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        subject_id = self.request.query_params.get("subject_id")
+        if subject_id:
+            qs = qs.filter(subject_id=subject_id)
+        return qs
 
 
 class QuestionViewSet(viewsets.ModelViewSet):
@@ -50,6 +67,11 @@ class QuestionViewSet(viewsets.ModelViewSet):
 class CATViewSet(viewsets.ViewSet):
 
     def _get_student_abilities(self, student_id, subject_id):
+        """
+        Lấy vector năng lực theo topic:
+          ability_vector = {topic_id: theta}
+          avg_theta      = trung bình, dùng fallback nếu câu không gắn topic.
+        """
         profiles = StudentAbilityProfile.objects.filter(
             student_id=student_id,
             topic__subject_id=subject_id
@@ -61,24 +83,45 @@ class CATViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["post"], url_path='start')
     @transaction.atomic
     def start_session(self, request):
+        """
+        Bắt đầu 1 phiên CAT.
+        - Nếu client gửi kèm topic_id -> lock đề vào đúng topic đó.
+        - Nếu không -> để None, hệ thống tự chọn câu hỏi theo toàn bộ subject.
+        """
         ser = StartCatSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 
+        student_id = data["student_id"]
+        subject_id = data["subject_id"]
+        target_items = data["target_items"]
+        topic_id = data.get("topic_id")  # có thể None
+
+        # Nếu có topic_id thì kiểm tra topic thuộc đúng môn
+        if topic_id is not None:
+            get_object_or_404(Topic, id=topic_id, subject_id=subject_id)
+
+        # Tạo session (nếu sau này bạn thêm field topic vào TestSession thì set luôn ở đây)
         session = TestSession.objects.create(
-            student_id=data["student_id"], subject_id=data["subject_id"],
-            target_items=data["target_items"], mode="CAT", status="ONGOING"
+            student_id=student_id,
+            subject_id=subject_id,
+            target_items=target_items,
+            mode="CAT",
+            status="ONGOING",
         )
 
-        ability_vector, avg_theta = self._get_student_abilities(
-            data["student_id"], data["subject_id"]
-        )
+        # Lấy năng lực hiện tại (nếu có)
+        ability_vector, avg_theta = self._get_student_abilities(student_id, subject_id)
 
-        # ✅ truyền đúng subject_id
+        # Context rule chung (mastery, cooldown, v.v.)
         rule_ctx = evaluate_rules(
-            student_id=data["student_id"],
-            subject_id=data["subject_id"],
+            student_id=student_id,
+            subject_id=subject_id,
+            ability_vector=ability_vector,
         )
+
+        # Nếu có topic được chọn -> truyền vào select_next_item
+        topic_ids_arg = [topic_id] if topic_id is not None else None
 
         next_q = select_next_item(
             ability_vector=ability_vector,
@@ -87,6 +130,7 @@ class CATViewSet(viewsets.ViewSet):
             used_q_ids=set(),
             rule_ctx=rule_ctx,
             position_in_session=1,
+            topic_ids=topic_ids_arg,  # lock theo topic nếu có
         )
 
         if next_q is None:
@@ -104,12 +148,18 @@ class CATViewSet(viewsets.ViewSet):
             "next_question": q_serializer.data,
             "stop": False,
             "current_position": 1,
-            "target_items": session.target_items
+            "target_items": session.target_items,
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path='answer')
     @transaction.atomic
     def post_answer(self, request):
+        """
+        Nhận đáp án 1 câu,
+        - Cập nhật năng lực IRT theo các topic của câu hỏi
+        - Quyết định dừng/tiếp tục
+        - Nếu tiếp tục: chọn câu tiếp theo (giữ nguyên topic nếu phiên đó có topic).
+        """
         ser = AnswerCatSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
@@ -128,7 +178,7 @@ class CATViewSet(viewsets.ViewSet):
         )
 
         # Các topic của câu hỏi (an toàn theo id)
-        question_topics = Topic.objects.filter(questiontag__question_id=q.id)
+        question_topics = Topic.objects.filter(questiontag__question_id=q.id).distinct()
 
         total_se = 0.0
         for topic in question_topics:
@@ -150,6 +200,7 @@ class CATViewSet(viewsets.ViewSet):
             profile.save(update_fields=["theta", "se", "updated_at"])
             total_se += new_se
 
+        # Lấy lại full ability vector sau khi update
         full_ability_vector, avg_theta = self._get_student_abilities(
             session.student_id, session.subject_id
         )
@@ -158,12 +209,17 @@ class CATViewSet(viewsets.ViewSet):
         avg_se = total_se / (question_topics.count() or 1)
         stop = (avg_se < 0.3) or (item_count >= session.target_items)
 
+        # 👉 lấy topic_id từ request (frontend giữ nguyên suốt phiên
+        #     khi gửi /cat/answer/)
+        topic_id = d.get("topic_id")
+        topic_ids_arg = [topic_id] if topic_id is not None else None
+
         next_q_data = None
         if not stop:
-            # ✅ truyền đúng subject_id (KHÔNG truyền dict thay subject_id)
             rule_ctx = evaluate_rules(
                 student_id=session.student_id,
                 subject_id=session.subject_id,
+                ability_vector=full_ability_vector,
             )
             used_ids = set(session.items.values_list("question_id", flat=True))
 
@@ -174,6 +230,7 @@ class CATViewSet(viewsets.ViewSet):
                 used_q_ids=used_ids,
                 rule_ctx=rule_ctx,
                 position_in_session=item_count + 1,  # câu sắp hỏi
+                topic_ids=topic_ids_arg,
             )
 
             if next_q:
@@ -193,7 +250,7 @@ class CATViewSet(viewsets.ViewSet):
             "next_question": next_q_data,
             "stop": stop,
             "current_position": item_count,
-            "target_items": session.target_items,   # thêm cho UI
+            "target_items": session.target_items,
         })
 
 

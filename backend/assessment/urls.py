@@ -1,11 +1,13 @@
 # assessment/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import SubjectViewSet, QuestionViewSet, CATViewSet, FixedTestViewSet
+from .views import SubjectViewSet, QuestionViewSet, CATViewSet, FixedTestViewSet, TopicViewSet
 
 router = DefaultRouter()
 router.register(r"subjects", SubjectViewSet, basename="subject")
 router.register(r"questions", QuestionViewSet, basename="question")
+router.register(r"topics", TopicViewSet, basename="topic") 
+
 
 # *** THAY ĐỔI: 'basename' là không cần thiết cho ViewSet
 # và thêm ViewSet mới

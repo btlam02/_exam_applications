@@ -68,10 +68,6 @@ class QuestionStats(models.Model):
     exposure_rate = models.FloatField(null=True, blank=True)
 
 # === 4) Người học & năng lực ===
-# === 4) Người học & năng lực (ĐÃ CẬP NHẬT) ===
-# XÓA model StudentAbility cũ đi
-# class StudentAbility(models.Model): ...
-
 # THÊM model mới này vào
 class StudentAbilityProfile(models.Model):
 
@@ -103,6 +99,15 @@ class TestSession(models.Model):
     status = models.CharField(max_length=16, default="ONGOING")  # ONGOING/FINISHED
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    topic = models.ForeignKey(
+        "Topic",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="test_sessions",
+        help_text="Nếu không null, phiên CAT này chỉ sinh câu hỏi trong topic này."
+    )
+
 
 class TestItem(models.Model):
     session = models.ForeignKey(TestSession, on_delete=models.CASCADE, related_name="items")
