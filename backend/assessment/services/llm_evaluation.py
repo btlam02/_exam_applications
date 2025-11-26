@@ -102,7 +102,7 @@ def call_deepseek_for_eval(prompt: str) -> Dict[str, Any]:
     Gọi DeepSeek thật để đánh giá câu hỏi.
     """
     resp = deepseek_client.chat.completions.create(
-        model="deepseek-chat",  # hoặc model bạn đang dùng
+        model="deepseek-chat", 
         messages=[{"role": "user", "content": prompt}],
         temperature=0.4,
         max_tokens=512,
